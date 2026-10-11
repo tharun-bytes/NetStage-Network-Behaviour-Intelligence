@@ -179,3 +179,34 @@ def test_investigations_workflow(client):
     assert rep_json.status_code == 200
     assert rep_json.json()["report_id"] == report_id
 
+def test_copilot_conversations_api(client):
+    # 1. Create conversation
+    create_resp = client.post("/api/v1/copilot/conversations?title=Incident%20Triage")
+    assert create_resp.status_code == 200
+    conv = create_resp.json()
+    cid = conv["conversation_id"]
+
+    # 2. Multi-turn message in conversation
+    chat_resp = client.post("/api/v1/copilot/chat", json={
+        "conversation_id": cid,
+        "message": "Did our dataset contain any unusual records?",
+    })
+    assert chat_resp.status_code == 200
+    chat_data = chat_resp.json()
+    assert chat_data["conversation_id"] == cid
+
+    # 3. List conversations
+    list_resp = client.get("/api/v1/copilot/conversations")
+    assert list_resp.status_code == 200
+    assert any(c["conversation_id"] == cid for c in list_resp.json())
+
+    # 4. Get history
+    hist_resp = client.get(f"/api/v1/copilot/conversations/{cid}")
+    assert hist_resp.status_code == 200
+    assert len(hist_resp.json()["messages"]) >= 2
+
+    # 5. Delete conversation
+    del_resp = client.delete(f"/api/v1/copilot/conversations/{cid}")
+    assert del_resp.status_code == 200
+
+

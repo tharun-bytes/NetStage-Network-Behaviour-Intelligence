@@ -9,6 +9,7 @@ import {
   Play,
   RotateCcw,
   Sliders,
+  Sparkles,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../api/client";
@@ -16,9 +17,10 @@ import { PredictionResponse } from "../types";
 import { Badge } from "../components/common/Badge";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { Alert } from "../components/common/Alert";
+import { PageBackground } from "../components/common/PageBackground";
 
 export const ClassificationPage: React.FC<{ onNavigate: (tab: string) => void }> = ({ onNavigate }) => {
-  const { models, activeModelId, activeModelDetail, selectActiveModel, showToast } = useApp();
+  const { models, activeModelId, activeModelDetail, selectActiveModel, showToast, askCopilot } = useApp();
 
   const [mode, setMode] = useState<"batch" | "single">("batch");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -143,31 +145,48 @@ export const ClassificationPage: React.FC<{ onNavigate: (tab: string) => void }>
   }
 
   return (
-    <div className="space-y-6">
-      {/* Model Selection Header Bar */}
-      <div className="rounded-xl border border-slate-800/80 bg-[#111827] p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-sm font-semibold text-white">Active Classification Model</h3>
-          <p className="text-xs text-slate-400">
-            {activeModelDetail ? `${activeModelDetail.metadata.model_name} (Holdout Accuracy: ${(activeModelDetail.metrics.accuracy * 100).toFixed(1)}%)` : "Select a trained model for inference"}
-          </p>
-        </div>
+    <div className="relative min-h-[calc(100vh-8rem)]">
+      <PageBackground imageSrc="/assets/netsage/network-topology.jpg" overlayVariant="dark" opacity={0.22} />
 
-        <div className="flex items-center gap-3">
-          <label className="text-xs text-slate-400">Model:</label>
-          <select
-            value={activeModelId || ""}
-            onChange={handleModelChange}
-            className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-xs text-slate-200 focus:border-cyan-500 focus:outline-none font-mono"
-          >
-            {models.map((m) => (
-              <option key={m.model_id} value={m.model_id}>
-                {m.model_name} (F1: {m.macro_f1.toFixed(3)})
-              </option>
-            ))}
-          </select>
+      <div className="relative z-10 space-y-6">
+        {/* Model Selection Header Bar */}
+        <div className="rounded-xl border border-slate-800/80 bg-[#111827]/90 p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 backdrop-blur-md">
+          <div>
+            <h3 className="text-sm font-semibold text-white">Active Classification Model</h3>
+            <p className="text-xs text-slate-400">
+              {activeModelDetail ? `${activeModelDetail.metadata.model_name} (Holdout Accuracy: ${(activeModelDetail.metrics.accuracy * 100).toFixed(1)}%)` : "Select a trained model for inference"}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() =>
+                askCopilot(
+                  `Explain the classification capabilities and confidence characteristics of the active model ${
+                    activeModelDetail?.metadata.model_name || "selected model"
+                  }.`
+                )
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/70 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900 transition-colors shadow-sm"
+              title="Ask Copilot about active model behavior"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+              Ask Copilot
+            </button>
+            <label className="text-xs text-slate-400">Model:</label>
+            <select
+              value={activeModelId || ""}
+              onChange={handleModelChange}
+              className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-xs text-slate-200 focus:border-cyan-500 focus:outline-none font-mono"
+            >
+              {models.map((m) => (
+                <option key={m.model_id} value={m.model_id}>
+                  {m.model_name} (F1: {m.macro_f1.toFixed(3)})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-      </div>
 
       {/* Mode Selector Tabs */}
       <div className="flex border-b border-slate-800">
@@ -396,6 +415,7 @@ export const ClassificationPage: React.FC<{ onNavigate: (tab: string) => void }>
                     <th className="p-3">Predicted Category</th>
                     <th className="p-3">Confidence Score</th>
                     <th className="p-3">Class Probabilities</th>
+                    <th className="p-3 pr-4 text-right">Copilot Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
@@ -430,6 +450,26 @@ export const ClassificationPage: React.FC<{ onNavigate: (tab: string) => void }>
                           <span>Uniform probability distribution</span>
                         )}
                       </td>
+                      <td className="p-3 pr-4 text-right">
+                        <button
+                          onClick={() =>
+                            askCopilot(
+                              `Why did the model classify flow record #${r.index + 1} as "${
+                                r.predicted_class
+                              }" with ${((r.confidence || 0) * 100).toFixed(
+                                1
+                              )}% confidence? What key indicators supported this verdict?`,
+                              r,
+                              "classification"
+                            )
+                          }
+                          className="inline-flex items-center gap-1 rounded bg-indigo-950/80 px-2 py-1 text-[11px] font-sans font-medium text-indigo-300 hover:bg-indigo-900 border border-indigo-800/60 transition-colors"
+                          title="Ask Copilot why this flow received this prediction"
+                        >
+                          <Sparkles className="h-3 w-3 text-indigo-400" />
+                          Why this?
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -443,6 +483,7 @@ export const ClassificationPage: React.FC<{ onNavigate: (tab: string) => void }>
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };

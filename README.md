@@ -160,19 +160,19 @@ Open your browser at **`http://localhost:5173`**. The interactive Swagger API do
 ## 6. Running Automated Tests
 
 ### Backend Tests (pytest)
-Runs 19 automated unit and integration tests across data validation, preprocessing, model training, anomaly detection, copilot reasoning, and multi-agent orchestration:
+Runs 20 automated unit and integration tests across data validation, preprocessing, model training, anomaly detection, copilot tool registry, conversational sessions, and multi-agent orchestration:
 ```powershell
 .\venv\Scripts\pytest.exe -v
 ```
-*Result: 19 passed in ~3.7s*
+*Result: 20 passed in ~2.3s*
 
 ### Frontend Tests (vitest)
-Runs UI integration and render tests:
+Runs UI integration, navigation shell, Hero Showcase, AI Copilot, and floating assistant tests:
 ```powershell
 cd frontend
 npm run test -- --run
 ```
-*Result: 3 passed in ~3.9s*
+*Result: 6 passed in ~2.8s*
 
 ### Frontend Production Build
 Verifies strict TypeScript compilation and production asset bundling:
@@ -180,7 +180,7 @@ Verifies strict TypeScript compilation and production asset bundling:
 cd frontend
 npm run build
 ```
-*Result: 2,501 modules transformed, `dist/` bundle created with zero errors.*
+*Result: 2,504 modules transformed, `dist/` bundle created with zero errors in ~1.0s.*
 
 ---
 

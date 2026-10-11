@@ -18,9 +18,10 @@ import {
 import { api } from "../api/client";
 import { useApp } from "../context/AppContext";
 import { AgentStepStatus, InvestigationDetail } from "../types";
+import { PageBackground } from "../components/common/PageBackground";
 
 export const AIAgentControlPage: React.FC<{ onNavigate?: (tab: string) => void }> = ({ onNavigate }) => {
-  const { profile, notify } = useApp();
+  const { profile, notify, askCopilot } = useApp();
   const [investigation, setInvestigation] = useState<InvestigationDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [threshold, setThreshold] = useState<number>(0.5);
@@ -97,46 +98,61 @@ export const AIAgentControlPage: React.FC<{ onNavigate?: (tab: string) => void }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Header Banner */}
-      <div className="relative overflow-hidden rounded-xl border border-slate-800 bg-[#111827] p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-purple-700/60 shadow-lg shadow-purple-950/50">
-              <img
-                src="/assets/netsage/network-topology.jpg"
-                alt="Agent Topology"
-                className="h-full w-full object-cover"
-              />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-white tracking-tight">AI Agent Control Center</h2>
-                <span className="rounded bg-purple-950 px-2 py-0.5 text-[10px] font-mono font-medium text-purple-300 border border-purple-800">
-                  Sequential Multi-Agent Orchestration
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Coordinated autonomous pipeline: Traffic Analyst → Investigation Agent → Reporting Agent.
-              </p>
-            </div>
-          </div>
+    <div className="relative min-h-[calc(100vh-8rem)]">
+      <PageBackground imageSrc="/assets/netsage/agents-bg.jpg" overlayVariant="dark" opacity={0.22} />
 
-          <div className="flex items-center gap-2">
-            {onNavigate && (
-              <button
-                onClick={() => onNavigate("reports")}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
-              >
-                <FileText className="h-3.5 w-3.5" /> Investigation History
-              </button>
-            )}
+      <div className="relative z-10 space-y-6">
+        {/* Top Header Banner */}
+        <div className="relative overflow-hidden rounded-xl border border-slate-800 bg-[#111827]/90 p-6 shadow-sm backdrop-blur-md">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-purple-700/60 shadow-lg shadow-purple-950/50">
+                <img
+                  src="/assets/netsage/network-topology.jpg"
+                  alt="Agent Topology"
+                  className="h-full w-full object-cover"
+                />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-white tracking-tight">AI Agent Control Center</h2>
+                  <span className="rounded bg-purple-950 px-2 py-0.5 text-[10px] font-mono font-medium text-purple-300 border border-purple-800">
+                    Sequential Multi-Agent Orchestration
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Coordinated autonomous pipeline: Traffic Analyst → Investigation Agent → Reporting Agent.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {investigation && (
+                <button
+                  onClick={() =>
+                    askCopilot(
+                      `Summarize the key findings, anomalous indicators, and remediation recommendations from the latest multi-agent forensic investigation: "${investigation.title}" (Status: ${investigation.status}, Evidence Items: ${Object.keys(investigation.evidence_dossier || {}).length}).`
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/70 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900 transition-colors shadow-sm"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-indigo-400" /> Summarize with Copilot
+                </button>
+              )}
+              {onNavigate && (
+                <button
+                  onClick={() => onNavigate("reports")}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+                >
+                  <FileText className="h-3.5 w-3.5" /> Investigation History
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Control Configuration Bar */}
-      <div className="rounded-xl border border-slate-800 bg-[#111827] p-5 shadow-sm space-y-4">
+        {/* Control Configuration Bar */}
+        <div className="rounded-xl border border-slate-800 bg-[#111827]/90 p-5 shadow-sm space-y-4 backdrop-blur-md">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold text-white uppercase tracking-wider font-mono flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-cyan-400" /> Launch Investigation Pipeline
@@ -451,6 +467,7 @@ export const AIAgentControlPage: React.FC<{ onNavigate?: (tab: string) => void }
           </p>
         </div>
       )}
+      </div>
     </div>
   );
 };

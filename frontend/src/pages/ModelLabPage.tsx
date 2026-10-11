@@ -10,6 +10,7 @@ import {
   Play,
   RotateCcw,
   Sliders,
+  Sparkles,
 } from "lucide-react";
 import {
   Bar,
@@ -27,9 +28,10 @@ import { StatCard } from "../components/common/StatCard";
 import { Badge } from "../components/common/Badge";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { Alert } from "../components/common/Alert";
+import { PageBackground } from "../components/common/PageBackground";
 
 export const ModelLabPage: React.FC<{ onNavigate: (tab: string) => void }> = () => {
-  const { profile, models, activeModelId, activeModelDetail, refreshModels, selectActiveModel, showToast } = useApp();
+  const { profile, models, activeModelId, activeModelDetail, refreshModels, selectActiveModel, showToast, askCopilot } = useApp();
 
   const [selectedTrainModel, setSelectedTrainModel] = useState<string>("random_forest");
   const [testSize, setTestSize] = useState<number>(0.2);
@@ -74,9 +76,12 @@ export const ModelLabPage: React.FC<{ onNavigate: (tab: string) => void }> = () 
   const cm = activeModelDetail?.metrics.confusion_matrix;
 
   return (
-    <div className="space-y-6">
-      {/* Model Training & Experiment Config Bar */}
-      <div className="rounded-xl border border-slate-800/80 bg-[#111827] p-5 shadow-sm space-y-4">
+    <div className="relative min-h-[calc(100vh-8rem)]">
+      <PageBackground imageSrc="/assets/netsage/models-bg.jpg" overlayVariant="dark" opacity={0.22} />
+
+      <div className="relative z-10 space-y-6">
+        {/* Model Training & Experiment Config Bar */}
+        <div className="rounded-xl border border-slate-800/80 bg-[#111827]/90 p-5 shadow-sm space-y-4 backdrop-blur-md">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold text-white flex items-center gap-2">
@@ -159,13 +164,26 @@ export const ModelLabPage: React.FC<{ onNavigate: (tab: string) => void }> = () 
       {training && <LoadingSpinner message="Fitting preprocessing transformers and training estimator..." />}
 
       {/* Model Benchmark Comparison Table */}
-      <div className="rounded-xl border border-slate-800/80 bg-[#111827] overflow-hidden shadow-sm">
+      <div className="rounded-xl border border-slate-800/80 bg-[#111827]/90 overflow-hidden shadow-sm backdrop-blur-md">
         <div className="p-4 bg-slate-900/70 border-b border-slate-800 flex items-center justify-between">
           <div>
             <h4 className="text-sm font-semibold text-white">Model Benchmark Leaderboard</h4>
             <p className="text-xs text-slate-400">Head-to-head comparison of trained model architectures</p>
           </div>
-          <Badge label={`${models.length} models tracked`} variant="info" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() =>
+                askCopilot(
+                  `Compare the benchmark performance of the ${models.length} trained models in the leaderboard, focusing on holdout accuracy vs macro F1 trade-offs.`
+                )
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/70 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900 transition-colors shadow-sm"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+              Compare Models with Copilot
+            </button>
+            <Badge label={`${models.length} models tracked`} variant="info" />
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -329,14 +347,28 @@ export const ModelLabPage: React.FC<{ onNavigate: (tab: string) => void }> = () 
           )}
 
           {/* Classification Report Raw Text */}
-          <div className="rounded-xl border border-slate-800/80 bg-[#111827] p-5 shadow-sm">
-            <h4 className="text-sm font-semibold text-white mb-2">Classification Report</h4>
+          <div className="rounded-xl border border-slate-800/80 bg-[#111827]/90 p-5 shadow-sm backdrop-blur-md">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-white">Classification Report</h4>
+              <button
+                onClick={() =>
+                  askCopilot(
+                    `Explain the classification report and per-class precision/recall for ${activeModelDetail.metadata.model_name}:\n\n${activeModelDetail.metrics.classification_report_text}`
+                  )
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/70 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900 transition-colors shadow-sm"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+                Explain Report with Copilot
+              </button>
+            </div>
             <pre className="p-4 rounded-lg bg-slate-950 border border-slate-800 font-mono text-xs text-slate-300 overflow-x-auto">
               {activeModelDetail.metrics.classification_report_text}
             </pre>
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };

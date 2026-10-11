@@ -16,9 +16,11 @@ import { useApp } from "../context/AppContext";
 import { StatCard } from "../components/common/StatCard";
 import { Badge } from "../components/common/Badge";
 import { Alert } from "../components/common/Alert";
+import { PageBackground } from "../components/common/PageBackground";
+import { Sparkles } from "lucide-react";
 
 export const DataManagementPage: React.FC<{ onNavigate: (tab: string) => void }> = () => {
-  const { profile, status, models, loadSampleDataset, uploadDataset, loading, showToast } = useApp();
+  const { profile, status, models, loadSampleDataset, uploadDataset, loading, showToast, askCopilot } = useApp();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
@@ -51,23 +53,39 @@ export const DataManagementPage: React.FC<{ onNavigate: (tab: string) => void }>
   };
 
   return (
-    <div className="space-y-6">
-      {/* UCI RT-IoT2022 Acquisition Guide */}
-      <div className="rounded-xl border border-slate-800/80 bg-[#111827] p-5 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Database className="h-5 w-5 text-cyan-400" />
-            <h3 className="text-sm font-semibold text-white">UCI RT-IoT2022 Dataset Ingestion Guide</h3>
+    <div className="relative min-h-[calc(100vh-8rem)]">
+      <PageBackground imageSrc="/assets/netsage/dataset-bg.jpg" overlayVariant="dark" opacity={0.22} />
+
+      <div className="relative z-10 space-y-6">
+        {/* UCI RT-IoT2022 Acquisition Guide */}
+        <div className="rounded-xl border border-slate-800/80 bg-[#111827]/90 p-5 shadow-sm space-y-3 backdrop-blur-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-cyan-400" />
+              <h3 className="text-sm font-semibold text-white">UCI RT-IoT2022 Dataset Ingestion Guide</h3>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() =>
+                  askCopilot(
+                    "Explain the UCI RT-IoT2022 dataset schema, its 85 network telemetry features, attack vectors (DDoS, Brute Force, MQTT attacks), and preprocessing requirements."
+                  )
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/70 px-3 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900 transition-colors shadow-sm"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+                Explain Schema with Copilot
+              </button>
+              <a
+                href="https://archive.ics.uci.edu/dataset/942/rt-iot2022"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 font-medium"
+              >
+                Official UCI Repository <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
           </div>
-          <a
-            href="https://archive.ics.uci.edu/dataset/942/rt-iot2022"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 font-medium"
-          >
-            Official UCI Repository <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
 
         <p className="text-xs text-slate-400 leading-relaxed">
           NetSage is calibrated for the UCI RT-IoT2022 dataset collected from realistic smart-home IoT devices under attack.
@@ -266,6 +284,7 @@ export const DataManagementPage: React.FC<{ onNavigate: (tab: string) => void }>
             </div>
           ))}
         </div>
+      </div>
       </div>
     </div>
   );

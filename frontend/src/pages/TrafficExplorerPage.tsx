@@ -7,6 +7,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Sparkles,
   Table as TableIcon,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
@@ -15,9 +16,10 @@ import { FlowRecord } from "../types";
 import { Badge } from "../components/common/Badge";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { EmptyState } from "../components/common/EmptyState";
+import { PageBackground } from "../components/common/PageBackground";
 
 export const TrafficExplorerPage: React.FC = () => {
-  const { profile } = useApp();
+  const { profile, askCopilot } = useApp();
 
   const [records, setRecords] = useState<FlowRecord[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
@@ -100,79 +102,99 @@ export const TrafficExplorerPage: React.FC = () => {
   const attackClasses = Object.keys(profile.target_distribution || {});
 
   return (
-    <div className="space-y-5">
-      {/* Search and Filters Bar */}
-      <div className="rounded-xl border border-slate-800/80 bg-[#111827] p-4 shadow-sm space-y-3">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-3">
-          {/* Text Search */}
-          <form onSubmit={handleSearchSubmit} className="relative flex-1 w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search across flow records (e.g. proto, service, label)..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-lg bg-slate-900 border border-slate-800 pl-9 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            />
-          </form>
+    <div className="relative min-h-[calc(100vh-8rem)]">
+      <PageBackground imageSrc="/assets/netsage/traffic-bg.jpg" overlayVariant="dark" opacity={0.22} />
 
-          {/* Quick Filter Selects */}
-          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-            {/* Target Filter */}
-            <select
-              value={targetFilter}
-              onChange={(e) => {
-                setTargetFilter(e.target.value);
-                setPage(1);
-              }}
-              className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none font-mono"
-            >
-              <option value="">All Traffic Classes</option>
-              {attackClasses.map((cls) => (
-                <option key={cls} value={cls}>
-                  {cls}
-                </option>
-              ))}
-            </select>
+      <div className="relative z-10 space-y-5">
+        {/* Search and Filters Bar */}
+        <div className="rounded-xl border border-slate-800/80 bg-[#111827]/90 p-4 shadow-sm space-y-3 backdrop-blur-md">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+            {/* Text Search */}
+            <form onSubmit={handleSearchSubmit} className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Search across flow records (e.g. proto, service, label)..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded-lg bg-slate-900 border border-slate-800 pl-9 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </form>
 
-            {/* Protocol Filter */}
-            <select
-              value={protoFilter}
-              onChange={(e) => {
-                setProtoFilter(e.target.value);
-                setPage(1);
-              }}
-              className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none font-mono"
-            >
-              <option value="">All Protocols</option>
-              <option value="tcp">TCP</option>
-              <option value="udp">UDP</option>
-              <option value="icmp">ICMP</option>
-            </select>
-
-            {/* Reset */}
-            {(search || targetFilter || protoFilter) && (
-              <button
-                onClick={handleResetFilters}
-                className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-850 px-2.5 py-2 text-xs text-slate-400 hover:text-white transition-colors"
-                title="Reset Filters"
+            {/* Quick Filter Selects */}
+            <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+              {/* Target Filter */}
+              <select
+                value={targetFilter}
+                onChange={(e) => {
+                  setTargetFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none font-mono"
               >
-                <RotateCcw className="h-3.5 w-3.5" />
-                <span>Reset</span>
-              </button>
-            )}
+                <option value="">All Traffic Classes</option>
+                {attackClasses.map((cls) => (
+                  <option key={cls} value={cls}>
+                    {cls}
+                  </option>
+                ))}
+              </select>
 
-            {/* Export CSV */}
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-1.5 rounded-lg bg-cyan-700/80 px-3 py-2 text-xs font-medium text-white hover:bg-cyan-600 transition-colors shadow-sm"
-              title="Export Current View"
-            >
-              <Download className="h-3.5 w-3.5" />
-              <span>Export CSV</span>
-            </button>
+              {/* Protocol Filter */}
+              <select
+                value={protoFilter}
+                onChange={(e) => {
+                  setProtoFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none font-mono"
+              >
+                <option value="">All Protocols</option>
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
+                <option value="icmp">ICMP</option>
+              </select>
+
+              {/* Reset */}
+              {(search || targetFilter || protoFilter) && (
+                <button
+                  onClick={handleResetFilters}
+                  className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-850 px-2.5 py-2 text-xs text-slate-400 hover:text-white transition-colors"
+                  title="Reset Filters"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Reset</span>
+                </button>
+              )}
+
+              {/* Ask Copilot */}
+              <button
+                onClick={() =>
+                  askCopilot(
+                    `Summarize the current network traffic characteristics${
+                      targetFilter ? ` for class ${targetFilter}` : ""
+                    }${
+                      protoFilter ? ` using protocol ${protoFilter}` : ""
+                    } in the dataset. Highlight the top volume patterns, typical flow durations, and distinguishing packet characteristics.`
+                  )
+                }
+                className="flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/70 px-3 py-2 text-xs font-medium text-indigo-300 hover:bg-indigo-900 transition-colors shadow-sm"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+                <span>Ask Copilot</span>
+              </button>
+
+              {/* Export CSV */}
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-1.5 rounded-lg bg-cyan-700/80 px-3 py-2 text-xs font-medium text-white hover:bg-cyan-600 transition-colors shadow-sm"
+                title="Export Current View"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Export CSV</span>
+              </button>
+            </div>
           </div>
-        </div>
 
         {/* Filter Stats Counter */}
         <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-800/60 pt-2.5">
@@ -220,6 +242,7 @@ export const TrafficExplorerPage: React.FC = () => {
                       {col}
                     </th>
                   ))}
+                  <th className="p-3 pr-4 text-right">Copilot Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
@@ -254,6 +277,22 @@ export const TrafficExplorerPage: React.FC = () => {
                           </td>
                         );
                       })}
+                      <td className="p-3 pr-4 text-right">
+                        <button
+                          onClick={() =>
+                            askCopilot(
+                              `Analyze and explain the network telemetry for flow record #${globalIdx} (${row["Attack_type"] || "Flow"}, proto: ${row["proto"]}, service: ${row["service"]}). What do its packets, duration, and flags indicate?`,
+                              row,
+                              "traffic"
+                            )
+                          }
+                          className="inline-flex items-center gap-1 rounded bg-indigo-950/80 px-2 py-1 text-[11px] font-sans font-medium text-indigo-300 hover:bg-indigo-900 border border-indigo-800/60 transition-colors"
+                          title="Ask Copilot about this flow"
+                        >
+                          <Sparkles className="h-3 w-3 text-indigo-400" />
+                          Inspect
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -285,6 +324,7 @@ export const TrafficExplorerPage: React.FC = () => {
             </button>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

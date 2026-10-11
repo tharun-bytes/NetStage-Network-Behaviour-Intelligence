@@ -8,16 +8,22 @@ import {
   PredictionResponse,
   RecordsPageData,
   SystemStatus,
+  UserProfile,
+  AuthResponse,
 } from "../types";
 
 const API_BASE = "/api/v1";
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
+  const token = typeof window !== "undefined" ? localStorage.getItem("netsage_token") : null;
+  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
   const response = await fetch(url, {
     ...options,
     headers: {
       "Accept": "application/json",
+      ...authHeaders,
       ...(options.headers || {}),
     },
   });
@@ -41,6 +47,30 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  // Authentication & User Session
+  loginWithGoogle: (credential: string) => request<AuthResponse>("/auth/google", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential }),
+  }),
+  registerWithEmail: (payload: { full_name: string; email: string; password: string }) => request<AuthResponse>("/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }),
+  loginWithEmail: (payload: { email: string; password: string }) => request<AuthResponse>("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }),
+  getMe: () => request<UserProfile>("/auth/me"),
+  logout: () => request<{ status: string; message: string }>("/auth/logout", { method: "POST" }),
+  forgotPassword: (email: string) => request<{ message: string; instructions: string }>("/auth/forgot-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  }),
+
   getHealth: () => request<{ status: string; version: string; uptime_seconds: number }>("/health"),
   getStatus: () => request<SystemStatus>("/status"),
   
@@ -140,16 +170,45 @@ export const api = {
   getReportDownloadUrl: (format: "txt" | "json" = "txt") => `${API_BASE}/reports/summary?export_format=${format}`,
 
   // Copilot
-  chatWithCopilot: (message: string, contextType: string = "general", selectedRecord?: Record<string, any>) =>
+  chatWithCopilot: (
+    message: string,
+    conversationId?: string,
+    contextType: string = "general",
+    selectedRecord?: Record<string, any>,
+    contextData?: Record<string, any>
+  ) =>
     request<import("../types").CopilotChatResponse>("/copilot/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message,
+        conversation_id: conversationId,
         context_type: contextType,
         selected_record: selectedRecord,
+        context_data: contextData,
       }),
     }),
+  getConversations: () => request<import("../types").ConversationSummary[]>("/copilot/conversations"),
+  createConversation: (title?: string) =>
+    request<import("../types").ConversationSummary>(
+      `/copilot/conversations${title ? `?title=${encodeURIComponent(title)}` : ""}`,
+      { method: "POST" }
+    ),
+  getConversationHistory: (conversationId: string) =>
+    request<{
+      conversation_id: string;
+      title: string;
+      created_at: string;
+      updated_at: string;
+      messages: import("../types").ChatMessageItem[];
+    }>(`/copilot/conversations/${encodeURIComponent(conversationId)}`),
+  deleteConversation: (conversationId: string) =>
+    request<{ conversation_id: string; status: string }>(`/copilot/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "DELETE",
+    }),
+  clearAllConversations: () =>
+    request<{ status: string; message: string }>("/copilot/conversations", { method: "DELETE" }),
+
 
   // AI Agent Investigations
   startInvestigation: (payload: {

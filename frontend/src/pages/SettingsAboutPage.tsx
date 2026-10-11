@@ -10,12 +10,69 @@ import {
   Terminal,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
+import { useAuth } from "../context/AuthContext";
+import { PageBackground } from "../components/common/PageBackground";
 
 export const SettingsAboutPage: React.FC = () => {
   const { status } = useApp();
+  const { user, isAuthenticated, logout } = useAuth();
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="relative min-h-[calc(100vh-8rem)]">
+      <PageBackground imageSrc="/assets/netsage/hero-network.jpg" overlayVariant="dark" opacity={0.2} />
+
+      <div className="relative z-10 space-y-6 max-w-5xl">
+      {/* Analyst Profile & AI Copilot System Card */}
+      <div className="rounded-xl border border-cyan-800/60 bg-[#0d1326] p-6 shadow-xl space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            {user?.picture ? (
+              <img src={user.picture} alt={user.full_name} className="h-10 w-10 rounded-full object-cover border border-cyan-500/50" />
+            ) : (
+              <div className="h-10 w-10 rounded-lg bg-cyan-600/30 border border-cyan-500/50 flex items-center justify-center text-cyan-300 font-bold text-sm">
+                {user?.full_name?.charAt(0) || "A"}
+              </div>
+            )}
+            <div>
+              <h3 className="text-sm font-bold text-white">
+                {isAuthenticated ? user?.full_name : "Security Analyst (Guest Mode)"}
+              </h3>
+              <p className="text-xs text-slate-400">
+                {isAuthenticated ? user?.email : "Local unauthenticated session · Full telemetry access enabled"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-cyan-950 px-2.5 py-1 text-[10px] font-mono font-medium text-cyan-300 border border-cyan-800">
+              {isAuthenticated ? `Provider: ${user?.auth_provider?.toUpperCase()}` : "Guest / Preview"}
+            </span>
+            {isAuthenticated && (
+              <button
+                onClick={logout}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:text-rose-400 hover:border-rose-900 transition-colors"
+              >
+                Sign Out
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
+          <div className="rounded-lg bg-slate-900/90 border border-slate-800 p-3 space-y-1">
+            <span className="text-slate-400 block text-[10px]">AI Copilot Engine</span>
+            <span className="text-cyan-300 font-bold">Google Gemini 3.8 Flash</span>
+          </div>
+          <div className="rounded-lg bg-slate-900/90 border border-slate-800 p-3 space-y-1">
+            <span className="text-slate-400 block text-[10px]">Authentication Subsystem</span>
+            <span className="text-emerald-400 font-bold">PBKDF2-HMAC + JWT + Google OAuth</span>
+          </div>
+          <div className="rounded-lg bg-slate-900/90 border border-slate-800 p-3 space-y-1">
+            <span className="text-slate-400 block text-[10px]">Context Grounding</span>
+            <span className="text-teal-300 font-bold">Active UCI RT-IoT2022 Stream</span>
+          </div>
+        </div>
+      </div>
+
       {/* Platform Architecture & About */}
       <div className="rounded-xl border border-slate-800/80 bg-[#111827] p-6 shadow-sm space-y-4">
         <div className="flex items-center gap-3">
@@ -132,6 +189,7 @@ export const SettingsAboutPage: React.FC = () => {
             </pre>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -13,9 +13,11 @@ import {
 import { api } from "../api/client";
 import { useApp } from "../context/AppContext";
 import { InvestigationSummary } from "../types";
+import { PageBackground } from "../components/common/PageBackground";
+import { Sparkles } from "lucide-react";
 
 export const ReportsHistoryPage: React.FC<{ onNavigate?: (tab: string) => void }> = ({ onNavigate }) => {
-  const { notify } = useApp();
+  const { notify, askCopilot } = useApp();
   const [reports, setReports] = useState<InvestigationSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -57,52 +59,66 @@ export const ReportsHistoryPage: React.FC<{ onNavigate?: (tab: string) => void }
   );
 
   return (
-    <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="relative overflow-hidden rounded-xl border border-slate-800 bg-[#111827] p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-teal-700/60 shadow-lg shadow-teal-950/50">
-              <img
-                src="/assets/netsage/report-audit.jpg"
-                alt="Audit Reports"
-                className="h-full w-full object-cover"
-              />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-white tracking-tight">
-                  Forensic Reports & Investigation History
-                </h2>
-                <span className="rounded bg-teal-950 px-2 py-0.5 text-[10px] font-mono font-medium text-teal-300 border border-teal-800">
-                  Audit Trail
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Downloadable Markdown and JSON forensic artifacts generated across all multi-agent investigations.
-              </p>
-            </div>
-          </div>
+    <div className="relative min-h-[calc(100vh-8rem)]">
+      <PageBackground imageSrc="/assets/netsage/reports-bg.jpg" overlayVariant="dark" opacity={0.22} />
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={loadReports}
-              disabled={loading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white transition-colors"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
-            </button>
-            {onNavigate && (
+      <div className="relative z-10 space-y-6">
+        {/* Header Banner */}
+        <div className="relative overflow-hidden rounded-xl border border-slate-800 bg-[#111827]/90 p-6 shadow-sm backdrop-blur-md">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-teal-700/60 shadow-lg shadow-teal-950/50">
+                <img
+                  src="/assets/netsage/report-audit.jpg"
+                  alt="Audit Reports"
+                  className="h-full w-full object-cover"
+                />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-white tracking-tight">
+                    Forensic Reports & Investigation History
+                  </h2>
+                  <span className="rounded bg-teal-950 px-2 py-0.5 text-[10px] font-mono font-medium text-teal-300 border border-teal-800">
+                    Audit Trail
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Downloadable Markdown and JSON forensic artifacts generated across all multi-agent investigations.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => onNavigate("agents")}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-md hover:bg-cyan-500 transition-colors"
+                onClick={() =>
+                  askCopilot(
+                    `Summarize the history of forensic investigation reports across our sessions. How many total investigations were run and what severity findings were identified?`
+                  )
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/70 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900 transition-colors shadow-sm"
               >
-                New Investigation <ArrowRight className="h-3.5 w-3.5" />
+                <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+                Audit Summary with Copilot
               </button>
-            )}
+              <button
+                onClick={loadReports}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white transition-colors"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+              </button>
+              {onNavigate && (
+                <button
+                  onClick={() => onNavigate("agents")}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-md hover:bg-cyan-500 transition-colors"
+                >
+                  New Investigation <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
       {/* Search & Filter Bar */}
       <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-[#111827] p-3 text-xs">
@@ -212,6 +228,7 @@ export const ReportsHistoryPage: React.FC<{ onNavigate?: (tab: string) => void }
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };

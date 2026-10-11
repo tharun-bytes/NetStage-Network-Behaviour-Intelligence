@@ -7,6 +7,12 @@ interface NotificationToast {
   message: string;
 }
 
+export interface CopilotContextPayload {
+  prompt: string;
+  record?: Record<string, any>;
+  type?: string;
+}
+
 interface AppContextType {
   status: SystemStatus | null;
   profile: DatasetProfile | null;
@@ -16,6 +22,9 @@ interface AppContextType {
   loading: boolean;
   error: string | null;
   notification: NotificationToast | null;
+  copilotPayload: CopilotContextPayload | null;
+  askCopilot: (prompt: string, record?: Record<string, any>, type?: string) => void;
+  clearCopilotPayload: () => void;
   refreshStatus: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshModels: () => Promise<void>;
@@ -38,6 +47,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<NotificationToast | null>(null);
+  const [copilotPayload, setCopilotPayload] = useState<CopilotContextPayload | null>(null);
+
+  const askCopilot = (prompt: string, record?: Record<string, any>, type?: string) => {
+    setCopilotPayload({ prompt, record, type });
+  };
+
+  const clearCopilotPayload = () => setCopilotPayload(null);
 
   const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
     setNotification({ message, type });
@@ -152,6 +168,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loading,
         error,
         notification,
+        copilotPayload,
+        askCopilot,
+        clearCopilotPayload,
         refreshStatus,
         refreshProfile,
         refreshModels,

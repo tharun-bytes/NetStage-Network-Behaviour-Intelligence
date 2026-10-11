@@ -2,28 +2,35 @@ import React from "react";
 import {
   Download,
   FolderOpen,
+  LogOut,
   Menu,
   RefreshCw,
   Server,
   ShieldCheck,
+  User,
 } from "lucide-react";
 import { useApp } from "../../context/AppContext";
+import { useAuth } from "../../context/AuthContext";
 import { api } from "../../api/client";
 
 interface TopbarProps {
   activeTab: string;
   collapsed: boolean;
   setCollapsed: (c: boolean) => void;
+  onNavigate?: (tab: string) => void;
 }
 
 export const Topbar: React.FC<TopbarProps> = ({
   activeTab,
   collapsed,
   setCollapsed,
+  onNavigate,
 }) => {
   const { status, profile, loading, loadSampleDataset, refreshStatus, refreshProfile, showToast } = useApp();
+  const { user, isAuthenticated, logout } = useAuth();
 
   const titleMap: Record<string, string> = {
+    landing: "Platform Architectural Showcase & Hero Entry",
     overview: "Telemetry Overview & KPI Dashboard",
     traffic: "Traffic Explorer & Flow Analyzer",
     classification: "Multi-Class Traffic Inference Engine",
@@ -35,6 +42,8 @@ export const Topbar: React.FC<TopbarProps> = ({
     reports: "Forensic Reports & Investigation History",
     data: "Data Management & UCI RT-IoT2022 Schema",
     settings: "Settings, Model Cards & System Attribution",
+    login: "Security Analyst Authentication",
+    signup: "New Analyst Registration",
   };
 
   const handleDownloadReport = () => {
@@ -112,6 +121,50 @@ export const Topbar: React.FC<TopbarProps> = ({
         >
           <RefreshCw className="h-4 w-4" />
         </button>
+
+        {/* User Account Controls */}
+        <div className="pl-2 border-l border-slate-800 flex items-center gap-2">
+          {isAuthenticated ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 rounded-lg bg-slate-900/90 border border-slate-800 py-1 px-2.5">
+                {user?.picture ? (
+                  <img src={user.picture} alt={user.full_name} className="h-5 w-5 rounded-full object-cover" />
+                ) : (
+                  <div className="h-5 w-5 rounded-full bg-cyan-600 flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                    {user?.full_name?.charAt(0) || "A"}
+                  </div>
+                )}
+                <div className="hidden lg:block text-left text-[11px] leading-tight">
+                  <div className="font-medium text-slate-200 max-w-[110px] truncate">{user?.full_name}</div>
+                  <div className="text-[9px] font-mono text-cyan-400 capitalize">{user?.auth_provider || "analyst"}</div>
+                </div>
+              </div>
+              <button
+                onClick={logout}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-rose-400 transition-colors"
+                title="Sign Out"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => onNavigate && onNavigate("login")}
+                className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+              >
+                <User className="h-3.5 w-3.5 text-cyan-400" />
+                <span>Sign In</span>
+              </button>
+              <button
+                onClick={() => onNavigate && onNavigate("signup")}
+                className="hidden sm:inline-flex items-center rounded-lg bg-cyan-600/90 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-cyan-500 transition-colors"
+              >
+                Sign Up
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

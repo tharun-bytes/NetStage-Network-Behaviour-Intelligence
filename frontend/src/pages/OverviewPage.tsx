@@ -27,6 +27,8 @@ import { StatCard } from "../components/common/StatCard";
 import { EmptyState } from "../components/common/EmptyState";
 import { Badge } from "../components/common/Badge";
 import { Alert } from "../components/common/Alert";
+import { PageBackground } from "../components/common/PageBackground";
+import { Sparkles } from "lucide-react";
 
 const CLASS_COLORS = [
   "#06b6d4", "#10b981", "#8b5cf6", "#f59e0b", "#ef4444",
@@ -34,7 +36,7 @@ const CLASS_COLORS = [
 ];
 
 export const OverviewPage: React.FC<{ onNavigate: (tab: string) => void }> = ({ onNavigate }) => {
-  const { profile, status, activeModelDetail, loadSampleDataset, loading } = useApp();
+  const { profile, status, activeModelDetail, loadSampleDataset, loading, askCopilot } = useApp();
 
   if (!profile) {
     return (
@@ -168,8 +170,11 @@ export const OverviewPage: React.FC<{ onNavigate: (tab: string) => void }> = ({ 
   const topCorrs = profile.top_correlations.slice(0, 5);
 
   return (
-    <div className="space-y-6">
-      {/* KPI Top Cards */}
+    <div className="relative min-h-[calc(100vh-8rem)]">
+      <PageBackground imageSrc="/assets/netsage/dashboard-bg.jpg" overlayVariant="dark" opacity={0.22} />
+
+      <div className="relative z-10 space-y-6">
+        {/* KPI Top Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Flows Analyzed"
@@ -416,6 +421,7 @@ export const OverviewPage: React.FC<{ onNavigate: (tab: string) => void }> = ({ 
             Agent Control
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from backend.app.config import settings
 from backend.app.routes import (
     anomalies_router,
+    auth_router,
     copilot_router,
     datasets_router,
     explanations_router,
@@ -40,6 +41,7 @@ app.add_middleware(
 )
 
 # Register API v1 routes
+app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(health_router, prefix=settings.API_V1_PREFIX)
 app.include_router(datasets_router, prefix=settings.API_V1_PREFIX)
 app.include_router(models_router, prefix=settings.API_V1_PREFIX)

@@ -25,9 +25,10 @@ import { StatCard } from "../components/common/StatCard";
 import { Badge } from "../components/common/Badge";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { Alert } from "../components/common/Alert";
+import { PageBackground } from "../components/common/PageBackground";
 
 export const ExplainabilityPage: React.FC<{ onNavigate: (tab: string) => void }> = () => {
-  const { profile, activeModelId, activeModelDetail } = useApp();
+  const { profile, activeModelId, activeModelDetail, askCopilot } = useApp();
 
   const [globalExp, setGlobalExp] = useState<GlobalExplanation | null>(null);
   const [localExp, setLocalExp] = useState<LocalExplanation | null>(null);
@@ -106,36 +107,53 @@ export const ExplainabilityPage: React.FC<{ onNavigate: (tab: string) => void }>
   }
 
   return (
-    <div className="space-y-6">
-      {/* Top Banner */}
-      <div className="rounded-xl border border-slate-800/80 bg-[#111827] p-5 shadow-sm">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <BrainCircuit className="h-4 w-4 text-cyan-400" />
-              Interpretable Machine Learning & Feature Attribution
-            </h3>
-            <p className="text-xs text-slate-400">
-              Model: <span className="font-mono text-cyan-300 font-medium">{activeModelDetail?.metadata.model_name || activeModelId}</span> · Method: {globalExp?.method || "Tree Feature Importance"}
-            </p>
-          </div>
+    <div className="relative min-h-[calc(100vh-8rem)]">
+      <PageBackground imageSrc="/assets/netsage/xai-bg.jpg" overlayVariant="dark" opacity={0.22} />
 
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-slate-400 font-mono">Top Features:</span>
-            {[8, 12, 16].map((n) => (
+      <div className="relative z-10 space-y-6">
+        {/* Top Banner */}
+        <div className="rounded-xl border border-slate-800/80 bg-[#111827]/90 p-5 shadow-sm backdrop-blur-md">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <BrainCircuit className="h-4 w-4 text-cyan-400" />
+                Interpretable Machine Learning & Feature Attribution
+              </h3>
+              <p className="text-xs text-slate-400">
+                Model: <span className="font-mono text-cyan-300 font-medium">{activeModelDetail?.metadata.model_name || activeModelId}</span> · Method: {globalExp?.method || "Tree Feature Importance"}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5 text-xs">
               <button
-                key={n}
-                onClick={() => setTopN(n)}
-                className={`px-2 py-1 rounded font-mono ${
-                  topN === n ? "bg-cyan-950 text-cyan-400 border border-cyan-800" : "bg-slate-900 text-slate-400 hover:text-white"
-                }`}
+                onClick={() =>
+                  askCopilot(
+                    `Explain the global feature importance attributions for model ${
+                      activeModelDetail?.metadata.model_name || activeModelId
+                    }. Which features exert the strongest influence on classification verdicts?`
+                  )
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/70 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900 transition-colors shadow-sm"
               >
-                {n}
+                <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+                Explain Attributions
               </button>
-            ))}
+
+              <span className="text-slate-400 font-mono">Top Features:</span>
+              {[8, 12, 16].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setTopN(n)}
+                  className={`px-2 py-1 rounded font-mono ${
+                    topN === n ? "bg-cyan-950 text-cyan-400 border border-cyan-800" : "bg-slate-900 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
       {/* Global Feature Importance Chart */}
       <div className="rounded-xl border border-slate-800/80 bg-[#111827] p-5 shadow-sm">
@@ -272,6 +290,7 @@ export const ExplainabilityPage: React.FC<{ onNavigate: (tab: string) => void }>
             </div>
           </div>
         ) : null}
+      </div>
       </div>
     </div>
   );

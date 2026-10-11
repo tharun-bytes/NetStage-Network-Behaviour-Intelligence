@@ -156,16 +156,42 @@ export interface CopilotFinding {
   supporting_features: string[];
 }
 
+export interface CopilotAction {
+  id: string;
+  label: string;
+  action_type: string;
+  payload: Record<string, any>;
+}
+
 export interface CopilotChatResponse {
+  conversation_id?: string;
   reply: string;
   summary: string;
   findings: CopilotFinding[];
   evidence_references: string[];
   uncertainty_notes: string;
   recommendations: string[];
+  related_actions?: CopilotAction[];
   is_rule_based_fallback: boolean;
   provider: string;
 }
+
+export interface ConversationSummary {
+  conversation_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface ChatMessageItem {
+  id: string;
+  sender: "user" | "copilot";
+  text: string;
+  timestamp: string;
+  data?: CopilotChatResponse | null;
+}
+
 
 export interface AgentStepStatus {
   agent_name: string;
@@ -201,4 +227,20 @@ export interface InvestigationSummary {
   anomalies_flagged: number;
   risk_level: string;
 }
+
+export interface UserProfile {
+  user_id: string;
+  email: string;
+  full_name: string;
+  auth_provider: "google" | "password" | "demo";
+  picture?: string | null;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: UserProfile;
+  message: string;
+}
+
 

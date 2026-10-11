@@ -38,6 +38,7 @@ dist/
 
 # Models & Artifacts
 models/*.joblib
+models/*_metadata.json
 !models/.gitkeep
 !models/README.md
 
@@ -45,11 +46,16 @@ models/*.joblib
 data/*.zip
 data/*.tar.gz
 data/raw/
+data/conversations/
+data/users.json
+data/*.json
 !data/README.md
 !data/*.csv
 
 # Environment & IDE
 .env
+.env.*
+!.env.example
 .env.local
 .vscode/
 .idea/

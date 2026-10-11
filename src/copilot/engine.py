@@ -1,151 +1,661 @@
+import datetime
+import json
+import logging
 import os
+import uuid
+from pathlib import Path
 from typing import Any, Optional
 
-def generate_copilot_response(
-    user_query: str,
-    dataset_profile: Optional[dict[str, Any]] = None,
-    active_model_data: Optional[dict[str, Any]] = None,
-    anomaly_data: Optional[dict[str, Any]] = None,
+import httpx
+
+from backend.app.config import settings
+from src.copilot import tools
+
+logger = logging.getLogger("netsage.copilot")
+
+# In-memory conversation session store
+CONVERSATIONS: dict[str, dict[str, Any]] = {}
+
+def _init_conversations_from_disk():
+    """Load existing persisted conversations from data/conversations."""
+    try:
+        conv_dir = settings.CONVERSATIONS_DIR
+        if not conv_dir.exists():
+            conv_dir.mkdir(parents=True, exist_ok=True)
+            return
+        for f in conv_dir.glob("*.json"):
+            try:
+                with open(f, "r", encoding="utf-8") as fp:
+                    data = json.load(fp)
+                    if "conversation_id" in data:
+                        CONVERSATIONS[data["conversation_id"]] = data
+            except Exception as fe:
+                logger.debug(f"Error loading conversation file {f.name}: {fe}")
+    except Exception as e:
+        logger.warning(f"Failed to initialize conversations from disk: {e}")
+
+_init_conversations_from_disk()
+
+def _persist_conversation(conv: dict[str, Any]) -> None:
+    """Save a conversation record to disk."""
+    try:
+        conv_dir = settings.CONVERSATIONS_DIR
+        conv_dir.mkdir(parents=True, exist_ok=True)
+        cid = conv.get("conversation_id", "conv_default")
+        uid = conv.get("user_id", "guest")
+        fpath = conv_dir / f"{uid}_{cid}.json"
+        with open(fpath, "w", encoding="utf-8") as fp:
+            json.dump(conv, fp, indent=2)
+    except Exception as e:
+        logger.warning(f"Could not persist conversation: {e}")
+
+def get_or_create_conversation(
+    conversation_id: Optional[str] = None,
+    title: Optional[str] = None,
+    user_id: str = "guest",
+) -> dict[str, Any]:
+    """Retrieve existing conversation or initialize a new multi-turn session."""
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    if conversation_id and conversation_id in CONVERSATIONS:
+        conv = CONVERSATIONS[conversation_id]
+        if not conv.get("user_id"):
+            conv["user_id"] = user_id
+        return conv
+    
+    new_id = conversation_id or f"conv_{uuid.uuid4().hex[:8]}"
+    conv = {
+        "conversation_id": new_id,
+        "user_id": user_id,
+        "title": title or "Network Intelligence Session",
+        "created_at": now,
+        "updated_at": now,
+        "messages": [],
+        "context_state": {
+            "selected_record": None,
+            "last_inspected_anomaly": None,
+            "last_report_id": None,
+        },
+    }
+    CONVERSATIONS[new_id] = conv
+    _persist_conversation(conv)
+    return conv
+
+def list_conversations(user_id: str = "guest") -> list[dict[str, Any]]:
+    """List conversation sessions belonging to the user, sorted by most recent."""
+    res = []
+    for cid, c in CONVERSATIONS.items():
+        c_user = c.get("user_id", "guest")
+        if user_id == "guest" or c_user == user_id or c_user == "guest":
+            res.append({
+                "conversation_id": cid,
+                "title": c.get("title", "Network Intelligence Session"),
+                "created_at": c.get("created_at"),
+                "updated_at": c.get("updated_at"),
+                "message_count": len(c.get("messages", [])),
+                "user_id": c_user,
+            })
+    return sorted(res, key=lambda x: x["updated_at"], reverse=True)
+
+def delete_conversation(conversation_id: str, user_id: str = "guest") -> bool:
+    """Delete a conversation session."""
+    if conversation_id in CONVERSATIONS:
+        conv = CONVERSATIONS[conversation_id]
+        c_user = conv.get("user_id", "guest")
+        if user_id != "guest" and c_user != user_id and c_user != "guest":
+            return False
+        del CONVERSATIONS[conversation_id]
+        try:
+            fpath = settings.CONVERSATIONS_DIR / f"{c_user}_{conversation_id}.json"
+            if fpath.exists():
+                fpath.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to delete conversation file: {e}")
+        return True
+    return False
+
+def clear_all_conversations(user_id: str = "guest") -> None:
+    """Clear conversation history for the specified user."""
+    to_delete = [
+        cid for cid, c in CONVERSATIONS.items()
+        if user_id == "guest" or c.get("user_id") == user_id or c.get("user_id") == "guest"
+    ]
+    for cid in to_delete:
+        delete_conversation(cid, user_id=user_id)
+
+
+def call_gemini_api(
+    system_instruction: str,
+    contents: list[dict[str, Any]],
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Call Google Gemini API using server-side configuration.
+    Never prints or logs the API key.
+    Returns (response_text, model_name_used).
+    """
+    api_key = settings.LLM_API_KEY or os.environ.get("LLM_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None, None
+    
+    models_to_try = [settings.LLM_MODEL]
+    for alt in ["gemini-3.5-flash", "gemini-flash-latest"]:
+        if alt not in models_to_try:
+            models_to_try.append(alt)
+
+    payload = {
+        "systemInstruction": {
+            "parts": [{"text": system_instruction}]
+        },
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.25,
+            "maxOutputTokens": 1024,
+            "thinkingConfig": {
+                "thinkingBudget": 0
+            }
+        }
+    }
+
+    try:
+        with httpx.Client(timeout=35.0) as client:
+            for model in models_to_try:
+                endpoint = f"{settings.LLM_BASE_URL}/models/{model}:generateContent?key={api_key}"
+                try:
+                    resp = client.post(endpoint, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates and "content" in candidates[0]:
+                            parts = candidates[0]["content"].get("parts", [])
+                            if parts and "text" in parts[0]:
+                                return parts[0]["text"].strip(), model
+                    else:
+                        logger.warning(f"Gemini API ({model}) returned HTTP {resp.status_code}: {resp.text[:180]}")
+                except Exception as me:
+                    logger.warning(f"Gemini API ({model}) request error: {type(me).__name__}: {str(me)[:120]}")
+    except Exception as e:
+        logger.warning(f"Gemini client invocation error: {type(e).__name__}: {str(e)[:120]}")
+
+    return None, None
+
+
+def build_system_prompt_and_context(
+    app_state: Any,
     selected_record: Optional[dict[str, Any]] = None,
+    tool_action_notes: Optional[str] = None,
+) -> str:
+    """Build a comprehensive, telemetry-grounded system prompt."""
+    meta = tools.get_dataset_metadata(app_state)
+    dist = tools.get_class_distributions(app_state)
+    m_info = tools.get_model_status_and_metrics(app_state)
+
+    dataset_summary = "No dataset currently loaded."
+    if meta.get("status") == "success":
+        top_classes = list(dist.get("distributions", {}).keys())[:4]
+        dataset_summary = (
+            f"Dataset Name: '{meta.get('dataset_name')}' | Total Flows: {meta.get('total_records'):,} | "
+            f"Numeric Features: {len(meta.get('numeric_features', []))} | "
+            f"Categorical Features: {len(meta.get('categorical_features', []))} | "
+            f"Duplicate Rows: {meta.get('duplicate_rows', 0)} ({meta.get('duplicate_percentage', 0.0):.1f}%) | "
+            f"Infinite Values: {meta.get('infinite_values', 0)} | "
+            f"Key Categories: {', '.join(top_classes)}"
+        )
+
+    model_summary = "No trained classification model active."
+    if m_info.get("status") == "success":
+        acc = m_info.get("accuracy")
+        acc_s = f"{(acc*100):.2f}%" if acc is not None else "N/A"
+        f1 = m_info.get("macro_f1", 0.0)
+        model_summary = (
+            f"Active Model: {m_info.get('model_name')} ({m_info.get('model_type')}) | "
+            f"Holdout Accuracy: {acc_s} | Macro F1-Score: {f1:.4f} | "
+            f"Test Samples: {m_info.get('total_test_samples')} | "
+            f"Classes: {', '.join(m_info.get('classes', []))}"
+        )
+
+    anomaly_summary = "Anomaly detector not yet evaluated."
+    if getattr(app_state, "anomaly_detector", None) is not None:
+        anom_res = tools.get_anomaly_summary_and_top_records(app_state, limit=3)
+        if anom_res.get("status") == "success":
+            anomaly_summary = (
+                f"Isolation Forest Detector: Evaluated {anom_res.get('total_records', 0):,} flows. "
+                f"Flagged Anomalies: {anom_res.get('flagged_count', 0)} ({anom_res.get('flagged_percentage', 0.0):.1f}%) "
+                f"at threshold {anom_res.get('threshold_used')}."
+            )
+
+    record_context = "None selected."
+    if selected_record:
+        record_context = f"Selected Record Sample Attributes: {json.dumps({k: v for k, v in list(selected_record.items())[:6]})}"
+
+    notes_section = f"\nRECENT AUTOMATED ACTION EXECUTION:\n{tool_action_notes}" if tool_action_notes else ""
+
+    return f"""You are NetSage AI Copilot, a senior Network Behaviour Intelligence and Defensive Cybersecurity Data Analyst.
+Your mission is to assist security analysts, network engineers, and data science students in exploring IoT telemetry flows, detecting anomalous events, understanding supervised and unsupervised machine learning decisions, and triaging threats.
+
+CORE BEHAVIORAL DIRECTIVES:
+1. Ground every claim directly in the live telemetry and system state provided below. Never fabricate dataset figures, attack labels, or detection metrics.
+2. If data is not yet loaded or evaluated, state so transparently and provide actionable guidance on what steps to take inside the platform.
+3. Be professional, lucid, and insightful. Keep explanations concise by default, and provide rigorous technical depth whenever requested.
+4. Adhere strictly to defensive security analysis: focus on root cause identification, behavioural telemetry indicators, and mitigation recommendations.
+5. Emphasize explainability: explain features that influence model predictions (e.g. packet frequencies, inter-arrival times, TCP flags, duration).
+
+CURRENT ACTIVE NETSAGE TELEMETRY & SYSTEM STATE:
+- Telemetry Dataset: {dataset_summary}
+- Classification Pipeline: {model_summary}
+- Unsupervised Outlier Profiling: {anomaly_summary}
+- Selected Flow Telemetry: {record_context}
+{notes_section}
+"""
+
+
+def process_copilot_turn(
+    user_query: str,
+    conversation_id: Optional[str] = None,
+    context_type: str = "general",
+    selected_record: Optional[dict[str, Any]] = None,
+    context_data: Optional[dict[str, Any]] = None,
+    app_state: Any = None,
+    user_id: str = "guest",
 ) -> dict[str, Any]:
     """
-    Process security copilot query. Uses external LLM if configured;
-    otherwise executes structured, deterministic rule-based analysis grounded in telemetry.
+    Execute a conversational intelligence turn. Preserves multi-turn state, invokes real tools,
+    interfaces with Gemini LLM with grounded telemetry context, and gracefully falls back to deterministic analysis.
     """
-    query_lower = user_query.lower()
+    conv = get_or_create_conversation(conversation_id, user_id=user_id)
+    cid = conv["conversation_id"]
+    ctx_state = conv["context_state"]
 
-    # Context extraction
-    total_records = dataset_profile.get("rows_count", 0) if dataset_profile else 0
-    classes = list(dataset_profile.get("target_distribution", {}).keys()) if dataset_profile else []
-    model_name = active_model_data.get("metadata", {}).get("model_name", "No active model") if active_model_data else "None"
-    accuracy = active_model_data.get("metrics", {}).get("accuracy") if active_model_data else None
-    macro_f1 = active_model_data.get("metrics", {}).get("macro_f1") if active_model_data else None
-    flagged_anomalies = anomaly_data.get("flagged_count", 0) if anomaly_data else 0
+    if selected_record:
+        ctx_state["selected_record"] = selected_record
+    if context_data and "record" in context_data:
+        ctx_state["selected_record"] = context_data["record"]
+
+    # Record user message in history
+    now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    conv["messages"].append({
+        "id": f"msg_{uuid.uuid4().hex[:6]}",
+        "sender": "user",
+        "text": user_query,
+        "timestamp": now_str,
+    })
+    conv["updated_at"] = now_str
+
+    # Update conversation title if first user message
+    if len(conv["messages"]) == 1:
+        first_title = user_query.strip()
+        if len(first_title) > 35:
+            first_title = first_title[:32] + "..."
+        conv["title"] = first_title
+
+    q_lower = user_query.lower().strip()
 
     findings = []
     evidence_refs = []
     recommendations = []
+    related_actions = []
+    tool_action_notes = None
 
-    # 1. Anomaly / Suspicious patterns inquiry
-    if any(k in query_lower for k in ["anomal", "outlier", "highest", "priority", "suspicious", "threat"]):
-        reply = (
-            f"Based on the active telemetry ({total_records:,} flows analyzed), our unsupervised Isolation Forest "
-            f"flagged {flagged_anomalies} records as structural outliers using a decision cut-off threshold of "
-            f"{anomaly_data.get('threshold', 0.5) if anomaly_data else 0.5}."
-        )
-        summary = f"Detected {flagged_anomalies} high-deviation network flows requiring analyst review."
-        findings.append({
-            "category": "Behavioral Anomaly",
-            "severity": "high" if flagged_anomalies > 50 else "medium",
-            "title": "Structural Rate & Inter-Arrival Divergence",
-            "description": f"{flagged_anomalies} flows demonstrated extreme path-length divergence in packet rates and TCP flags.",
-            "supporting_features": ["flow_pkts_per_sec", "flow_SYN_flag_count", "flow_iat.avg"],
-        })
-        evidence_refs.extend([
-            f"Flagged anomaly count: {flagged_anomalies}",
-            f"Dataset total volume: {total_records} flows",
-            f"Isolation threshold: {anomaly_data.get('threshold', 0.5) if anomaly_data else 0.5}",
-        ])
-        recommendations.extend([
-            "Inspect the top flagged outlier records in the Anomaly Investigation panel.",
-            "Verify whether flagged bursts correspond to external port scanning or internal MQTT synchronization.",
-            "Consider tightening the contamination parameter if false positive rate exceeds tolerance.",
-        ])
+    # Fallback deterministic text templates
+    fallback_reply = ""
+    fallback_summary = ""
 
-    # 2. Model performance / classification comparison inquiry
-    elif any(k in query_lower for k in ["model", "performance", "metric", "accuracy", "f1", "evaluat", "compare"]):
-        acc_str = f"{(accuracy * 100):.2f}%" if accuracy is not None else "N/A"
-        f1_str = f"{macro_f1:.4f}" if macro_f1 is not None else "N/A"
-        reply = (
-            f"Active classifier '{model_name}' achieved a held-out test accuracy of {acc_str} and an unweighted Macro F1-score of {f1_str}. "
-            f"Evaluation was performed on an 80/20 stratified split across {len(classes)} traffic categories."
-        )
-        summary = f"Active classifier exhibits {acc_str} accuracy with {f1_str} Macro-F1 across {len(classes)} classes."
-        findings.append({
-            "category": "Model Reliability",
-            "severity": "info",
-            "title": "Cross-Class Generalization Benchmark",
-            "description": f"Held-out split validation confirms robust separation across majority of classes, with Macro-F1 of {f1_str}.",
-            "supporting_features": ["macro_f1", "balanced_accuracy", "confusion_matrix"],
-        })
-        evidence_refs.extend([
-            f"Model Architecture: {model_name}",
-            f"Holdout Accuracy: {acc_str}",
-            f"Macro F1-Score: {f1_str}",
-            f"Classes evaluated: {', '.join(classes[:5])}...",
-        ])
-        recommendations.extend([
-            "Review the Confusion Matrix in Model Lab to check for potential confusion between SYN flood variants.",
-            "Compare with Random Forest and XGBoost in the Model Lab leaderboard to evaluate latency vs F1 trade-offs.",
-        ])
+    # -------------------------------------------------------------
+    # 1. Tool Intent Routing & Evidence Collection
+    # -------------------------------------------------------------
 
-    # 3. Single record explanation inquiry
-    elif selected_record or any(k in query_lower for k in ["record", "why", "flagged", "explain", "predict"]):
-        rec_cls = selected_record.get("Attack_type", "Unknown") if selected_record else "Normal"
-        rec_proto = selected_record.get("proto", "tcp") if selected_record else "tcp"
-        rec_pkts = selected_record.get("flow_pkts_per_sec", 0) if selected_record else 15.0
-        rec_syn = selected_record.get("flow_SYN_flag_count", 0) if selected_record else 1
+    # A. "Generate a report" or "investigation"
+    if any(k in q_lower for k in ["generate a report", "create report", "make report", "run report", "investigation report"]):
+        inv_res = tools.trigger_investigation(app_state, title=f"Copilot Report - {conv['title']}")
+        if inv_res.get("status") == "success":
+            ctx_state["last_report_id"] = inv_res.get("report_id")
+            tool_action_notes = (
+                f"Multi-agent investigation completed successfully. Report ID: {inv_res.get('report_id')}, "
+                f"Risk Rating: {inv_res.get('risk_rating')}, Analyzed Candidate Flows: {inv_res.get('candidate_count')}."
+            )
+            fallback_reply = (
+                f"I've initiated and completed an autonomous 3-agent forensic investigation on your active telemetry. "
+                f"The investigation analyzed {inv_res.get('candidate_count', 0)} candidate anomalous flows, "
+                f"assessed the overall risk as **{inv_res.get('risk_rating', 'Medium').upper()}**, and compiled a verified audit report."
+            )
+            fallback_summary = f"Forensic investigation completed (Risk: {inv_res.get('risk_rating')}). Report ready for download."
+            findings.append({
+                "category": "Forensic Audit",
+                "severity": inv_res.get("risk_rating", "medium").lower(),
+                "title": f"Investigation #{inv_res.get('investigation_id')}",
+                "description": f"Multi-agent correlation analyzed {inv_res.get('candidate_count', 0)} priority candidate flows.",
+                "supporting_features": ["statistical_divergences", "protocol_mix"],
+            })
+            evidence_refs.extend([
+                f"Investigation ID: {inv_res.get('investigation_id')}",
+                f"Assessed Risk: {inv_res.get('risk_rating')}",
+                f"Flagged Candidate Count: {inv_res.get('candidate_count')}",
+            ])
+            recommendations.append("Download the Markdown or JSON report for compliance archiving.")
+            related_actions.append({
+                "id": "view_report",
+                "label": "Open Report in Audit View",
+                "action_type": "navigate",
+                "payload": {"tab": "reports", "report_id": inv_res.get("report_id")},
+            })
+        else:
+            fallback_reply = f"Could not generate report: {inv_res.get('message')}"
+            fallback_summary = "Report generation halted."
+            recommendations.append("Ensure a dataset is loaded in Data Management first.")
 
-        reply = (
-            f"Examining flow record (Category: '{rec_cls}', Protocol: '{rec_proto}'). "
-            f"The primary features governing this classification are packet rate ({rec_pkts} pkts/s) and SYN flag counts ({rec_syn})."
-        )
-        summary = f"Flow classified as {rec_cls} based on transport frequency and protocol header flags."
-        findings.append({
-            "category": "Flow Attribution",
-            "severity": "high" if "dos" in str(rec_cls).lower() or "flood" in str(rec_cls).lower() else "low",
-            "title": f"Decision Boundary Evidence for {rec_cls}",
-            "description": f"High concentration of SYN flags combined with characteristic IAT separated this flow from baseline telemetry.",
-            "supporting_features": ["flow_SYN_flag_count", "flow_pkts_per_sec", "fwd_pkts_payload.avg"],
-        })
-        evidence_refs.extend([
-            f"Flow Category: {rec_cls}",
-            f"Protocol: {rec_proto}",
-            f"SYN Flag Count: {rec_syn}",
-            f"Packet Rate: {rec_pkts}",
-        ])
-        recommendations.extend([
-            "Inspect the local feature decomposition in the Explainable AI Lab for waterfall driver weights.",
-            "Cross-reference this flow against host logs on the destination endpoint.",
-        ])
+    # B. "Explain the most unusual one" or follow-up on top anomaly
+    elif any(k in q_lower for k in ["most unusual one", "top anomaly", "highest anomaly", "explain the most unusual", "worst anomaly", "top outlier"]):
+        anom_res = tools.get_anomaly_summary_and_top_records(app_state, limit=1)
+        if anom_res.get("status") == "success" and anom_res.get("top_outliers"):
+            top = anom_res["top_outliers"][0]
+            ctx_state["last_inspected_anomaly"] = top
+            attrs = top.get("attributes", {})
+            pkts = attrs.get("flow_pkts_per_sec", "N/A")
+            syn = attrs.get("flow_SYN_flag_count", "N/A")
+            proto = attrs.get("proto", "tcp")
+            score = top.get("anomaly_score", 0.0)
 
-    # 4. Default broad synthesis / report summary
+            tool_action_notes = (
+                f"Top structural outlier isolated: Flow #{top.get('index')} with score {score:.4f}. "
+                f"Protocol: {proto}, Packets/sec: {pkts}, SYN flags: {syn}."
+            )
+            fallback_reply = (
+                f"The most extreme structural outlier identified by our Isolation Forest is **Flow Record #{top.get('index')}** "
+                f"with an anomaly score of **{score:.3f}** (threshold: {anom_res.get('threshold_used')}). "
+                f"This flow communicates over **{proto}** and exhibited an atypical rate of **{pkts} pkts/s** and **{syn} SYN flags**."
+            )
+            fallback_summary = f"Top anomalous record #{top.get('index')} shows high packet rate and SYN flag saturation."
+            findings.append({
+                "category": "Structural Outlier",
+                "severity": "critical" if score > 0.8 else "high",
+                "title": f"Top Outlier Flow #{top.get('index')}",
+                "description": f"Isolation path length is significantly shorter than normal traffic baseline.",
+                "supporting_features": ["flow_pkts_per_sec", "flow_SYN_flag_count", "flow_iat.avg"],
+            })
+            evidence_refs.extend([
+                f"Record Index: {top.get('index')}",
+                f"Anomaly Score: {score:.4f}",
+                f"Protocol: {proto}",
+                f"Packet Frequency: {pkts}",
+            ])
+            recommendations.extend([
+                "Inspect this flow in the Traffic Explorer to verify target destination.",
+                "Compare its IAT distribution against benign IoT MQTT messages.",
+            ])
+            related_actions.append({
+                "id": "inspect_in_traffic",
+                "label": "Inspect in Traffic Explorer",
+                "action_type": "navigate",
+                "payload": {"tab": "traffic", "search": str(top.get("index"))},
+            })
+        else:
+            fallback_reply = "No anomaly records found. Please ensure a dataset is loaded and anomaly scoring has been executed."
+            fallback_summary = "No anomaly data available."
+
+    # C. "Did our dataset contain any unusual records?" or general anomaly inquiry
+    elif any(k in q_lower for k in ["unusual records", "contain any unusual", "any anomalies", "anomaly results", "what anomalies"]):
+        anom_res = tools.get_anomaly_summary_and_top_records(app_state, limit=3)
+        if anom_res.get("status") == "success":
+            count = anom_res.get("flagged_count", 0)
+            pct = anom_res.get("flagged_percentage", 0.0)
+            tool_action_notes = f"Isolation forest evaluated {anom_res.get('total_records', 0)} flows. Flagged {count} ({pct:.2f}%)."
+            fallback_reply = (
+                f"Yes. Unsupervised Isolation Forest analysis evaluated {anom_res.get('total_records', 0):,} flows "
+                f"and flagged **{count} records ({pct:.1f}%)** as structural anomalies using a cut-off threshold of {anom_res.get('threshold_used')}."
+            )
+            fallback_summary = f"Detected {count} anomalous flows ({pct:.1f}% of telemetry volume)."
+            findings.append({
+                "category": "Behavioral Anomaly",
+                "severity": "high" if count > 50 else "medium",
+                "title": "Unsupervised Outlier Detection",
+                "description": f"{count} flows deviate substantially from typical temporal and packet size distributions.",
+                "supporting_features": ["flow_duration", "flow_pkts_per_sec"],
+            })
+            evidence_refs.extend([
+                f"Flagged Anomalies: {count} flows",
+                f"Anomaly Percentage: {pct:.2f}%",
+                f"Detection Threshold: {anom_res.get('threshold_used')}",
+            ])
+            recommendations.append("Ask 'Explain the most unusual one' to inspect the top-ranked threat flow.")
+            related_actions.append({
+                "id": "view_anomalies",
+                "label": "View Anomaly Analysis",
+                "action_type": "navigate",
+                "payload": {"tab": "anomaly"},
+            })
+        else:
+            fallback_reply = f"Unable to check anomalies: {anom_res.get('message')}"
+            fallback_summary = "Anomaly query failed."
+
+    # D. "Analyze my current dataset" or dataset summary
+    elif any(k in q_lower for k in ["analyze my current dataset", "dataset summary", "summarize dataset", "dataset overview", "describe dataset"]):
+        meta = tools.get_dataset_metadata(app_state)
+        dist = tools.get_class_distributions(app_state)
+        if meta.get("status") == "success":
+            top_classes = list(dist.get("distributions", {}).keys())[:4]
+            fallback_reply = (
+                f"Your active dataset **'{meta.get('dataset_name')}'** contains **{meta.get('total_records'):,} flows** "
+                f"with **{len(meta.get('numeric_features'))} numeric** and **{len(meta.get('categorical_features'))} categorical features**. "
+                f"It spans **{dist.get('total_classes')} traffic categories** including: {', '.join(top_classes)}. "
+                f"Data quality audit found {meta.get('duplicate_rows')} duplicates and {meta.get('infinite_values')} infinite values."
+            )
+            fallback_summary = f"Dataset '{meta.get('dataset_name')}' loaded with {meta.get('total_records')} flows across {dist.get('total_classes')} categories."
+            findings.append({
+                "category": "Dataset Audit",
+                "severity": "info",
+                "title": "Data Hygiene Verification",
+                "description": f"Total flows: {meta.get('total_records')}, duplicate rate: {meta.get('duplicate_percentage')}%.",
+                "supporting_features": ["duplicate_rows", "infinite_values"],
+            })
+            evidence_refs.extend([
+                f"Dataset: {meta.get('dataset_name')}",
+                f"Record Count: {meta.get('total_records')}",
+                f"Categories: {dist.get('total_classes')}",
+            ])
+            recommendations.append("Proceed to Model Lab to train an explainable classifier.")
+            related_actions.append({
+                "id": "view_explorer",
+                "label": "Explore Flow Records",
+                "action_type": "navigate",
+                "payload": {"tab": "traffic"},
+            })
+        else:
+            fallback_reply = "No dataset is currently loaded. Click 'Load UCI RT-IoT2022 Fixture' on the Overview page to get started."
+            fallback_summary = "No active dataset."
+
+    # E. "Explain the model's performance" or model evaluation
+    elif any(k in q_lower for k in ["model's performance", "model performance", "explain the model", "how accurate", "evaluate model"]):
+        m_info = tools.get_model_status_and_metrics(app_state)
+        if m_info.get("status") == "success":
+            acc_val = m_info.get("accuracy")
+            acc_str = f"{(acc_val * 100):.2f}%" if acc_val is not None else "N/A"
+            f1_str = f"{m_info.get('macro_f1', 0.0):.4f}"
+            fallback_reply = (
+                f"The active model is **{m_info.get('model_name')}** ({m_info.get('model_type')}). "
+                f"On the held-out test split ({m_info.get('total_test_samples')} flows), it achieved an overall accuracy of **{acc_str}** "
+                f"and an unweighted **Macro F1-Score of {f1_str}** across {len(m_info.get('classes', []))} traffic categories."
+            )
+            fallback_summary = f"Active classifier exhibits {acc_str} holdout accuracy and {f1_str} Macro-F1."
+            findings.append({
+                "category": "Model Performance",
+                "severity": "info",
+                "title": "Holdout Test Benchmark",
+                "description": f"Evaluated with stratified holdout partitioning and zero-division metric safeguards.",
+                "supporting_features": ["accuracy", "macro_f1", "weighted_f1"],
+            })
+            evidence_refs.extend([
+                f"Model: {m_info.get('model_name')}",
+                f"Holdout Accuracy: {acc_str}",
+                f"Macro F1: {f1_str}",
+            ])
+            recommendations.append("Inspect the per-class confusion matrix in the Model Lab.")
+            related_actions.append({
+                "id": "view_model_lab",
+                "label": "Open Model Lab",
+                "action_type": "navigate",
+                "payload": {"tab": "model_lab"},
+            })
+        else:
+            fallback_reply = "No trained model is currently active. Go to the Model Lab to train Random Forest or XGBoost."
+            fallback_summary = "No model active."
+            related_actions.append({
+                "id": "train_model",
+                "label": "Train Model in Model Lab",
+                "action_type": "navigate",
+                "payload": {"tab": "model_lab"},
+            })
+
+    # F. "Compare traffic categories"
+    elif any(k in q_lower for k in ["compare traffic", "traffic categories", "classes in dataset", "categories"]):
+        dist = tools.get_class_distributions(app_state)
+        if dist.get("status") == "success":
+            items = list(dist.get("distributions", {}).items())
+            sorted_items = sorted(items, key=lambda x: x[1].get("count", 0), reverse=True)
+            top_3 = sorted_items[:3]
+            least_3 = sorted_items[-2:] if len(sorted_items) >= 2 else sorted_items
+            top_desc = ", ".join([f"{k} ({v.get('count')} flows, {v.get('percentage')}%)" for k, v in top_3])
+            least_desc = f"{least_3[0][0]}" if least_3 else "none"
+            fallback_reply = (
+                f"The dataset encompasses {len(items)} distinct categories. The most prevalent traffic types are: "
+                f"**{top_desc}**. The minority classes highlight natural multi-class imbalance common in real IoT testbeds."
+            )
+            fallback_summary = f"Multi-class composition analyzed across {len(items)} categories."
+            findings.append({
+                "category": "Traffic Distribution",
+                "severity": "info",
+                "title": "Class Imbalance Profile",
+                "description": "Identified predominant high-volume classes and minority attack variants.",
+                "supporting_features": ["target_distribution"],
+            })
+            evidence_refs.extend([f"Total categories: {len(items)}"] + [f"{k}: {v.get('count')}" for k, v in top_3])
+            recommendations.append("Filter flows in Traffic Explorer to inspect individual classes.")
+        else:
+            fallback_reply = "No dataset is currently loaded."
+            fallback_summary = "Dataset required."
+
+    # G. Specific record explanation / "Why did the model flag this record?"
+    elif ctx_state.get("selected_record") or any(k in q_lower for k in ["why did the model flag", "why this prediction", "explain this record", "explain this anomaly"]):
+        rec = ctx_state.get("selected_record") or {}
+        exp_res = tools.explain_specific_record(app_state, rec)
+        if exp_res.get("status") == "success":
+            pred_cls = exp_res.get("predicted_class")
+            conf = exp_res.get("confidence")
+            conf_str = f" ({conf*100:.1f}% confidence)" if conf else ""
+            fallback_reply = (
+                f"Model inference categorized this flow as **{pred_cls}**{conf_str}. "
+                f"{exp_res.get('narrative_summary')}"
+            )
+            fallback_summary = f"Flow attributed to {pred_cls} based on top continuous drivers."
+            findings.append({
+                "category": "Local Explainability",
+                "severity": "high" if "dos" in str(pred_cls).lower() or "scan" in str(pred_cls).lower() else "low",
+                "title": f"Feature Contribution for {pred_cls}",
+                "description": exp_res.get("narrative_summary", "Primary drivers computed."),
+                "supporting_features": [d["feature"] for d in exp_res.get("top_drivers", [])[:3]],
+            })
+            evidence_refs.extend([
+                f"Predicted Class: {pred_cls}",
+                f"Confidence: {conf_str}",
+            ] + [f"{d['feature']}: {d['original_value']} (impact: {d['impact']})" for d in exp_res.get("top_drivers", [])[:3]])
+            recommendations.append("Inspect this flow's full waterfall breakdown in the Explainable AI Lab.")
+            related_actions.append({
+                "id": "view_xai",
+                "label": "Open Explainability Lab",
+                "action_type": "navigate",
+                "payload": {"tab": "explainability"},
+            })
+        else:
+            fallback_reply = f"Could not explain record: {exp_res.get('message')}. Select a record in Traffic Explorer first."
+            fallback_summary = "Record explanation unavailable."
+
+    # H. General question
     else:
-        reply = (
-            f"NetSage AI Copilot standing by. Active dataset: '{dataset_profile.get('source_name', 'None')}' "
-            f"with {total_records:,} flows across {len(classes)} traffic categories. "
-            f"Active model: {model_name} (Acc: {((accuracy or 0) * 100):.1f}%). "
-            f"Isolation Forest flagged {flagged_anomalies} structural outliers."
+        meta = tools.get_dataset_metadata(app_state)
+        ds_name = meta.get("dataset_name", "None loaded")
+        flows_cnt = meta.get("total_records", 0)
+        fallback_reply = (
+            f"NetSage AI Copilot standing by. I am actively grounded in your active telemetry "
+            f"(Dataset: **{ds_name}**, {flows_cnt:,} flows). "
+            f"You can ask me to analyze anomalies, explain model predictions, inspect feature contributions, "
+            f"or generate multi-agent forensic audit reports."
         )
-        summary = "Telemetry synthesis ready across active dataset, models, and anomaly detectors."
-        findings.append({
-            "category": "Dataset Health",
-            "severity": "info",
-            "title": "Dataset Schema Integrity",
-            "description": f"Dataset contains {total_records} records with {dataset_profile.get('duplicate_rows', 0) if dataset_profile else 0} duplicates.",
-            "supporting_features": ["duplicate_rows", "missing_summary"],
-        })
-        evidence_refs.extend([
-            f"Total flows: {total_records}",
-            f"Identified classes: {len(classes)}",
-            f"Flagged anomalies: {flagged_anomalies}",
-        ])
+        fallback_summary = "Conversational Copilot standing by with grounded context."
+        evidence_refs.append(f"Active Telemetry Context: {ds_name} ({flows_cnt:,} flows)")
         recommendations.extend([
-            "Launch an automated 3-agent investigation from the AI Agent Control Center.",
-            "Filter suspicious flows in Traffic Explorer by selecting specific Attack_type filters.",
-            "Export the consolidated investigation report to Markdown or JSON.",
+            "Ask: 'Analyze my current dataset'",
+            "Ask: 'Did our dataset contain any unusual records?'",
+            "Ask: 'Generate a report'",
         ])
 
-    return {
-        "reply": reply,
-        "summary": summary,
+    # -------------------------------------------------------------
+    # 2. Invoke Google Gemini LLM with Multi-turn History & Telemetry Grounding
+    # -------------------------------------------------------------
+    system_prompt = build_system_prompt_and_context(
+        app_state=app_state,
+        selected_record=ctx_state.get("selected_record"),
+        tool_action_notes=tool_action_notes,
+    )
+
+    # Format multi-turn conversation history for Gemini
+    gemini_contents: list[dict[str, Any]] = []
+    # Take the last 8 messages
+    history_slice = conv["messages"][-8:]
+    for m in history_slice:
+        role = "user" if m.get("sender") == "user" else "model"
+        text = (m.get("text") or "").strip()
+        if not text:
+            continue
+        if gemini_contents and gemini_contents[-1]["role"] == role:
+            gemini_contents[-1]["parts"][0]["text"] += f"\n\n{text}"
+        else:
+            gemini_contents.append({"role": role, "parts": [{"text": text}]})
+
+    # Ensure conversation starts with user
+    while gemini_contents and gemini_contents[0]["role"] != "user":
+        gemini_contents.pop(0)
+
+    if not gemini_contents:
+        gemini_contents = [{"role": "user", "parts": [{"text": user_query}]}]
+
+    # Call Gemini model with automatic resiliency fallback across available models
+    gemini_response, model_used = call_gemini_api(system_prompt, gemini_contents)
+
+    if gemini_response and isinstance(gemini_response, str):
+        final_reply = gemini_response
+        sentences = [s.strip() for s in gemini_response.split(".") if s.strip()]
+        final_summary = (sentences[0] + ".") if sentences else gemini_response[:100]
+        if len(final_summary) > 120:
+            final_summary = final_summary[:117] + "..."
+        is_fallback = False
+        provider_name = f"Google Gemini ({model_used or settings.LLM_MODEL})"
+    else:
+        final_reply = fallback_reply
+        final_summary = fallback_summary
+        is_fallback = True
+        provider_name = "NetSage Grounded Intelligence Engine (Deterministic Fallback)"
+
+    response_dict = {
+        "conversation_id": cid,
+        "reply": final_reply,
+        "summary": final_summary,
         "findings": findings,
         "evidence_references": evidence_refs,
         "uncertainty_notes": (
-            "NOTICE: Copilot findings represent automated statistical heuristics and decision boundary attributions "
-            "conditioned on the loaded historical dataset. Corroborate with live host logs before executing policy changes."
+            "NOTICE: NetSage Copilot analyses are data-grounded assessments conditioned on active telemetry and fitted models. "
+            "Anomaly scores reflect tree isolation path lengths, not absolute attack certainty."
         ),
         "recommendations": recommendations,
-        "is_rule_based_fallback": True,
-        "provider": "NetSage Deterministic Rule-Based Intelligence Engine",
+        "related_actions": related_actions,
+        "is_rule_based_fallback": is_fallback,
+        "provider": provider_name,
     }
+
+    # Record assistant message in conversation and persist
+    conv["messages"].append({
+        "id": f"msg_{uuid.uuid4().hex[:6]}",
+        "sender": "copilot",
+        "text": final_reply,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "data": response_dict,
+    })
+    _persist_conversation(conv)
+
+    return response_dict
